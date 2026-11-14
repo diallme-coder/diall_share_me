@@ -7,100 +7,188 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
+  html, body { margin: 0; min-height: 100%; }
   body {
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     background: #fafafa; color: #111;
-    display: flex; align-items: center; justify-content: center; padding: 24px;
+    display: flex; align-items: center; justify-content: center; padding: 24px; min-height: 100vh;
   }
-  .wrap { width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 12px; }
+  .wrap { width: 100%; max-width: 560px; }
+  .view { display: none; flex-direction: column; gap: 14px; }
+  .view.on { display: flex; }
   textarea {
-    width: 100%; min-height: 260px; resize: vertical;
+    width: 100%; min-height: 240px; resize: vertical;
     border: 1px solid #ddd; border-radius: 12px; background: #fff;
     padding: 16px; font: inherit; font-size: 17px; line-height: 1.5; outline: none;
   }
-  textarea:focus { border-color: #111; }
-  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  textarea:focus, .code:focus { border-color: #111; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
   .count { font-size: 13px; color: #888; }
   .count.over { color: #c0392b; }
+  label { font-size: 14px; color: #555; display: flex; align-items: center; gap: 10px; }
+  .code {
+    width: 4.2em; text-align: center; font-size: 22px; letter-spacing: .25em; font-family: ui-monospace, monospace;
+    border: 1px solid #ddd; border-radius: 10px; padding: 8px 4px; background: #fff; outline: none;
+  }
+  .code.big { width: 5em; font-size: 40px; padding: 12px 4px; }
   button {
     border: 0; border-radius: 10px; padding: 12px 22px; font: inherit; font-size: 16px;
     background: #111; color: #fff; cursor: pointer;
   }
   button:disabled { opacity: .35; cursor: default; }
   button.ghost { background: transparent; color: #111; border: 1px solid #ccc; }
-  #qrView { display: none; flex-direction: column; align-items: center; gap: 16px; }
+  .center { align-items: center; text-align: center; }
   #qr { background: #fff; padding: 16px; border-radius: 12px; border: 1px solid #eee; width: 100%; max-width: 420px; }
   #qr svg { display: block; width: 100%; height: auto; }
-  .hint { font-size: 14px; color: #666; text-align: center; margin: 0; }
-  #err { color: #c0392b; font-size: 14px; min-height: 1em; margin: 0; }
+  .hint { font-size: 14px; color: #666; margin: 0; }
+  .err { color: #c0392b; font-size: 14px; min-height: 1.2em; margin: 0; }
+  #message {
+    white-space: pre-wrap; word-break: break-word; background: #fff; border: 1px solid #eee;
+    border-radius: 12px; padding: 16px; font-size: 17px; line-height: 1.5; text-align: left; width: 100%;
+  }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <div id="editView">
-      <form id="form" style="display:flex;flex-direction:column;gap:12px">
-        <textarea id="text" aria-label="Your text" autofocus></textarea>
-        <p id="err"></p>
-        <div class="row">
-          <span class="count" id="count">0 / 2,900 bytes</span>
-          <button type="submit" id="submit" disabled>Submit</button>
-        </div>
-      </form>
-    </div>
+<div class="wrap">
 
-    <div id="qrView">
-      <div id="qr" role="img" aria-label="QR code containing your text"></div>
-      <p class="hint">Scan to read. The text is only shared through this code.</p>
-      <button class="ghost" id="newBtn" type="button">New</button>
+  <!-- Sender: write -->
+  <form class="view" id="writeView">
+    <textarea id="text" aria-label="Your text"></textarea>
+    <div class="row">
+      <label>2-digit code <input class="code" id="code" inputmode="numeric" maxlength="2" autocomplete="off" placeholder="00"></label>
+      <span class="count" id="count"></span>
     </div>
+    <p class="err" id="writeErr"></p>
+    <div class="row" style="justify-content:flex-end">
+      <button type="submit" id="submit" disabled>Submit</button>
+    </div>
+  </form>
+
+  <!-- Sender: QR -->
+  <div class="view center" id="qrView">
+    <div id="qr" role="img" aria-label="QR code"></div>
+    <p class="hint">Scan to open. The reader needs your 2-digit code.</p>
+    <button class="ghost" id="newBtn" type="button">New</button>
   </div>
 
+  <!-- Receiver: enter code -->
+  <form class="view center" id="unlockView">
+    <p class="hint">Enter the 2-digit code</p>
+    <input class="code big" id="unlockCode" inputmode="numeric" maxlength="2" autocomplete="off" placeholder="00">
+    <p class="err" id="unlockErr"></p>
+    <button type="submit" id="unlockBtn" disabled>Open</button>
+  </form>
+
+  <!-- Receiver: message -->
+  <div class="view center" id="readView">
+    <div id="message"></div>
+  </div>
+
+</div>
+
 <script>
-  const MAX = 2900; // approx. byte capacity of a QR code at low error correction
-  const text = document.getElementById('text');
-  const count = document.getElementById('count');
-  const submit = document.getElementById('submit');
-  const err = document.getElementById('err');
-  const editView = document.getElementById('editView');
-  const qrView = document.getElementById('qrView');
-  const qrBox = document.getElementById('qr');
-  const enc = new TextEncoder();
+  const PAGES_URL = 'https://diallme-coder.github.io/diall_share_me/';
+  const QR_MAX = 2900;   // bytes a QR code can hold at low error correction
+  const $ = (id) => document.getElementById(id);
+  const enc = new TextEncoder(), dec = new TextDecoder();
 
-  function update() {
-    const n = enc.encode(text.value).length;
-    count.textContent = n.toLocaleString() + ' / 2,900 bytes';
-    count.classList.toggle('over', n > MAX);
-    submit.disabled = text.value.trim() === '' || n > MAX;
-    err.textContent = '';
+  function show(id) {
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === id));
   }
-  text.addEventListener('input', update);
+  function baseUrl() {
+    return location.hostname.endsWith('github.io') ? location.origin + location.pathname : PAGES_URL;
+  }
+  const digitsOnly = (el) => el.addEventListener('input', () => { el.value = el.value.replace(/\D/g, '').slice(0, 2); });
 
-  document.getElementById('form').addEventListener('submit', (e) => {
+  // base64url helpers
+  const toB64 = (u8) => btoa(String.fromCharCode(...u8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const fromB64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+
+  async function keyFrom(code, salt) {
+    const base = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' },
+      base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+  async function encrypt(text, code) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await keyFrom(code, salt), enc.encode(text)));
+    const out = new Uint8Array(salt.length + iv.length + ct.length);
+    out.set(salt); out.set(iv, 16); out.set(ct, 28);
+    return toB64(out);
+  }
+  async function decrypt(payload, code) {
+    const b = fromB64(payload);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(16, 28) }, await keyFrom(code, b.slice(0, 16)), b.slice(28));
+    return dec.decode(pt);
+  }
+
+  // ---------- Sender ----------
+  // Rough limit: URL = base + base64 of (28 bytes + text + 16 tag)
+  const textLimit = () => Math.floor((QR_MAX - baseUrl().length - 1) * 3 / 4) - 48;
+  function updateWrite() {
+    const n = enc.encode($('text').value).length, max = textLimit();
+    $('count').textContent = n.toLocaleString() + ' / ' + max.toLocaleString() + ' bytes';
+    $('count').classList.toggle('over', n > max);
+    $('submit').disabled = $('text').value.trim() === '' || n > max || $('code').value.length !== 2;
+    $('writeErr').textContent = '';
+  }
+  $('text').addEventListener('input', updateWrite);
+  digitsOnly($('code'));
+  $('code').addEventListener('input', updateWrite);
+
+  $('writeView').addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (submit.disabled) return;
+    if ($('submit').disabled) return;
+    $('submit').disabled = true;
     try {
       if (typeof qrcode === 'undefined') throw new Error('QR library failed to load.');
-      qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+      const url = baseUrl() + '#' + await encrypt($('text').value, $('code').value);
       const qr = qrcode(0, 'L');
-      qr.addData(text.value, 'Byte');
+      qr.addData(url, 'Byte');
       qr.make();
-      qrBox.innerHTML = qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
-      text.value = '';          // text leaves the page; only the QR remains
-      update();
-      editView.style.display = 'none';
-      qrView.style.display = 'flex';
+      $('qr').innerHTML = qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
+      $('text').value = ''; $('code').value = '';
+      updateWrite();
+      show('qrView');
     } catch (ex) {
-      err.textContent = 'Could not make a QR code: ' + (ex.message || ex);
+      $('writeErr').textContent = 'Could not make a QR code: ' + (ex.message || ex);
+      updateWrite();
+    }
+  });
+  $('newBtn').addEventListener('click', () => { $('qr').innerHTML = ''; show('writeView'); $('text').focus(); });
+
+  // ---------- Receiver ----------
+  const unlockCode = $('unlockCode');
+  digitsOnly(unlockCode);
+  unlockCode.addEventListener('input', () => {
+    $('unlockErr').textContent = '';
+    $('unlockBtn').disabled = unlockCode.value.length !== 2;
+    if (unlockCode.value.length === 2) $('unlockView').requestSubmit();
+  });
+  $('unlockView').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (unlockCode.value.length !== 2) return;
+    $('unlockBtn').disabled = true;
+    try {
+      $('message').textContent = await decrypt(location.hash.slice(1), unlockCode.value);
+      history.replaceState(null, '', location.pathname);   // drop the payload from the address bar
+      show('readView');
+    } catch {
+      $('unlockErr').textContent = 'Wrong code';
+      unlockCode.value = '';
+      unlockCode.focus();
     }
   });
 
-  document.getElementById('newBtn').addEventListener('click', () => {
-    qrBox.innerHTML = '';
-    qrView.style.display = 'none';
-    editView.style.display = 'block';
-    text.focus();
-  });
+  // ---------- Start ----------
+  if (!window.crypto || !crypto.subtle) {
+    document.querySelector('.wrap').innerHTML = '<p class="err">This page needs a secure (https) connection.</p>';
+  } else if (location.hash.length > 1) {
+    show('unlockView'); unlockCode.focus();
+  } else {
+    updateWrite(); show('writeView'); $('text').focus();
+  }
 </script>
 </body>
 </html>
