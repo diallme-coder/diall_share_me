@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Type & Share by QR</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #fafafa; color: #111;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .wrap { width: 100%; max-width: 560px; display: flex; flex-direction: column; gap: 12px; }
+  textarea {
+    width: 100%; min-height: 260px; resize: vertical;
+    border: 1px solid #ddd; border-radius: 12px; background: #fff;
+    padding: 16px; font: inherit; font-size: 17px; line-height: 1.5; outline: none;
+  }
+  textarea:focus { border-color: #111; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .count { font-size: 13px; color: #888; }
+  .count.over { color: #c0392b; }
+  button {
+    border: 0; border-radius: 10px; padding: 12px 22px; font: inherit; font-size: 16px;
+    background: #111; color: #fff; cursor: pointer;
+  }
+  button:disabled { opacity: .35; cursor: default; }
+  button.ghost { background: transparent; color: #111; border: 1px solid #ccc; }
+  #qrView { display: none; flex-direction: column; align-items: center; gap: 16px; }
+  #qr { background: #fff; padding: 16px; border-radius: 12px; border: 1px solid #eee; width: 100%; max-width: 420px; }
+  #qr svg { display: block; width: 100%; height: auto; }
+  .hint { font-size: 14px; color: #666; text-align: center; margin: 0; }
+  #err { color: #c0392b; font-size: 14px; min-height: 1em; margin: 0; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="editView">
+      <form id="form" style="display:flex;flex-direction:column;gap:12px">
+        <textarea id="text" aria-label="Your text" autofocus></textarea>
+        <p id="err"></p>
+        <div class="row">
+          <span class="count" id="count">0 / 2,900 bytes</span>
+          <button type="submit" id="submit" disabled>Submit</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="qrView">
+      <div id="qr" role="img" aria-label="QR code containing your text"></div>
+      <p class="hint">Scan to read. The text is only shared through this code.</p>
+      <button class="ghost" id="newBtn" type="button">New</button>
+    </div>
+  </div>
+
+<script>
+  const MAX = 2900; // approx. byte capacity of a QR code at low error correction
+  const text = document.getElementById('text');
+  const count = document.getElementById('count');
+  const submit = document.getElementById('submit');
+  const err = document.getElementById('err');
+  const editView = document.getElementById('editView');
+  const qrView = document.getElementById('qrView');
+  const qrBox = document.getElementById('qr');
+  const enc = new TextEncoder();
+
+  function update() {
+    const n = enc.encode(text.value).length;
+    count.textContent = n.toLocaleString() + ' / 2,900 bytes';
+    count.classList.toggle('over', n > MAX);
+    submit.disabled = text.value.trim() === '' || n > MAX;
+    err.textContent = '';
+  }
+  text.addEventListener('input', update);
+
+  document.getElementById('form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (submit.disabled) return;
+    try {
+      if (typeof qrcode === 'undefined') throw new Error('QR library failed to load.');
+      qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+      const qr = qrcode(0, 'L');
+      qr.addData(text.value, 'Byte');
+      qr.make();
+      qrBox.innerHTML = qr.createSvgTag({ cellSize: 8, margin: 2, scalable: true });
+      text.value = '';          // text leaves the page; only the QR remains
+      update();
+      editView.style.display = 'none';
+      qrView.style.display = 'flex';
+    } catch (ex) {
+      err.textContent = 'Could not make a QR code: ' + (ex.message || ex);
+    }
+  });
+
+  document.getElementById('newBtn').addEventListener('click', () => {
+    qrBox.innerHTML = '';
+    qrView.style.display = 'none';
+    editView.style.display = 'block';
+    text.focus();
+  });
+</script>
+</body>
+</html>
